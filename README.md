@@ -15,7 +15,7 @@
 | 給与計算 | 月給・日給・時給、手当 (課税/非課税、割増単価への算入可否)、勤怠連動の割増賃金と欠勤・遅刻早退控除、入退社月の日割り、健康保険・介護保険 (40〜64歳を自動判定)・子ども・子育て支援金・厚生年金・雇用保険、源泉所得税 (月額表 甲欄・乙欄の電算機計算の特例、令和8年分/令和9年分)、住民税 (6月と7月以降)、臨時の支給・控除、経費精算の給与合算、確定・公開、Web 給与明細 (印刷・PDF 保存)、給与一覧 CSV・振込 CSV、標準報酬月額の算定補助 |
 | ワークフロー | 多段承認 (上長・部門長・権限・指定者)、承認/却下/差戻し/取下げ/取消、管理者の代理承認、一括承認、コメント、通知、申請フォームのノーコード作成 (稟議・備品購入・出張・住所変更などを同梱) |
 | 経費精算 | 明細ごとの科目・税率・インボイス登録番号・交通費区間、領収書の添付 (R2)、給与合算または個別振込、支払管理、仕訳 CSV |
-| ログイン | Google アカウントでのログイン (Better Auth)。管理者が登録したメールアドレスの Google アカウントだけがログインでき、Google Workspace のドメインに限定することもできます |
+| ログイン | Google アカウントでのログイン (Better Auth)。管理者が登録したメールアドレスの Google アカウントだけがログインでき、Google Workspace のドメインに限定することもできます。初期セットアップは、デプロイ時に指定した管理者の Google アカウントだけが行えます |
 | その他 | ホームダッシュボード、お知らせ、通知、操作ログ、スマートフォン表示対応 |
 
 ## 構成
@@ -52,9 +52,26 @@
 | `BETTER_AUTH_SECRET` | シークレット | セッションの署名に使う乱数 (32文字以上)。`openssl rand -base64 32` などで作ります |
 | `GOOGLE_CLIENT_ID` | シークレット | OAuth クライアント ID |
 | `GOOGLE_CLIENT_SECRET` | シークレット | OAuth クライアント シークレット |
+| `SETUP_ADMIN_EMAIL` | シークレット | 最初の管理者になる方の Google アカウントのメールアドレス。初期セットアップでだけ使います |
 | `GOOGLE_HOSTED_DOMAIN` | `wrangler.jsonc` の vars | 任意。Google Workspace のドメイン (例: `example.co.jp`) を書くと、そのドメインのアカウントだけがログインできます |
 
 ログインできるのは、従業員の「アカウント」タブで登録したメールアドレスの Google アカウント (メールアドレスが Google で確認済みのもの) だけです。登録していない Google アカウントでログインしようとすると、Better Auth のユーザーも作らずに断ります。「ログインを許可する」を外したアカウントと退職者もログインできません。
+
+### 初期セットアップ前のログイン
+
+会社がまだ登録されていない間は、`SETUP_ADMIN_EMAIL` に設定したメールアドレスの Google アカウントだけがログインして初期セットアップを行えます。ほかのアカウントは断り、`SETUP_ADMIN_EMAIL` が未設定のときはセットアップ自体を受け付けません。デプロイしてからセットアップを終えるまでの間に、URL にたどり着いた別の人が管理者として登録してしまうのを防ぐためです。
+
+- 値を設定できるのは Cloudflare のアカウントを操作できる人だけなので、最初の管理者は「先にアクセスした人」ではなく、デプロイする人が指名した人になります。
+- セットアップが終わると使いませんが、`secrets.required` に入っているので消さずに残しておきます。D1 を作り直したときも、再びこのアカウントだけがセットアップできます。
+- `GOOGLE_HOSTED_DOMAIN` を設定している場合は、そのドメインのメールアドレスを指定してください。
+
+### 別の Google アカウントでのログイン
+
+従業員の Google アカウントは、最初にログインした Google アカウント (Google の ID) で固定します。あとから同じメールアドレスの別の Google アカウント (アカウントを作り直した場合や、メールアドレスが別の人に割り当て直された場合など) でログインしようとしても、「以前に別の Google アカウントでログインに使われています」と表示して断ります。
+
+従業員の情報や「アカウント」タブでログインに使うメールアドレスを変えると、古いアドレスでのログイン (セッションと Google アカウントとの紐付け) は消え、その人はログアウトされます。退職者のメールアドレスを別の人に割り当て直すときも、先に退職者のメールアドレスを変えることになるので、退職者のセッションが新しい従業員として使われることはありません。
+
+本人がアカウントを作り直したなど、新しい Google アカウントでログインさせてよいときは、古い Google アカウントとの紐付けを D1 で削除します: `npx wrangler d1 execute minamo-hr --remote --command "DELETE FROM auth_user WHERE email = '<メールアドレス>'"`
 
 ## ローカルで動かす
 
@@ -62,11 +79,11 @@ Node.js 20 以上が必要です。
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars   # BETTER_AUTH_SECRET・GOOGLE_CLIENT_ID・GOOGLE_CLIENT_SECRET を入れる
+cp .dev.vars.example .dev.vars   # BETTER_AUTH_SECRET・GOOGLE_CLIENT_ID・GOOGLE_CLIENT_SECRET・SETUP_ADMIN_EMAIL を入れる
 npm run dev
 ```
 
-http://localhost:5173 を開くと初期セットアップ画面が出ます。最初の管理者になる方の Google アカウントでログインし、会社名と氏名を登録してください。
+http://localhost:5173 を開くと初期セットアップ画面が出ます。`SETUP_ADMIN_EMAIL` に設定した Google アカウントでログインし、会社名と氏名を登録してください。
 「サンプルデータを入れる」にチェックすると、架空の部署・従業員 7名・2か月分の勤怠・申請が入ります。サンプル従業員のメールアドレスは `example.com` の架空のものなのでログインはできません。マネージャーや一般従業員の画面を試すときは、サンプル従業員 (例: マネージャーの佐藤、一般の鈴木) の「アカウント」タブで、メールアドレスを自分の別の Google アカウントに変えてください。
 
 D1・R2 はローカルでは `.wrangler/state` に作られます。消せば初期状態に戻ります。
@@ -78,21 +95,23 @@ npx wrangler login
 npx wrangler secret put BETTER_AUTH_SECRET
 npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put SETUP_ADMIN_EMAIL
 npm run deploy
 ```
 
 `wrangler.jsonc` の D1・R2 には ID を書いていないため、初回デプロイ時に自動で作成されます (Wrangler の Automatic resource provisioning)。
-デプロイ後に表示される URL を Google の OAuth クライアントのリダイレクト URI に登録してから開き、初期セットアップを行ってください。スキーマは最初のアクセスで自動作成されます。
+デプロイ後に表示される URL を Google の OAuth クライアントのリダイレクト URI に登録してから開き、`SETUP_ADMIN_EMAIL` の Google アカウントで初期セットアップを行ってください。スキーマは最初のアクセスで自動作成されます。
 
-- 3つのシークレットは `wrangler.jsonc` の `secrets.required` に書いてあり、未設定のままではデプロイが止まります。まだ Worker が無い初回は、`wrangler secret put` の代わりに `npx wrangler deploy --secrets-file <ファイル>` (`.dev.vars` と同じ `名前=値` の形式) で一緒に登録できます。シークレットは一度登録すれば以後のデプロイでも引き継がれます。
+- 4つのシークレットは `wrangler.jsonc` の `secrets.required` に書いてあり、未設定のままではデプロイが止まります。まだ Worker が無い初回は、`wrangler secret put` の代わりに `npx wrangler deploy --secrets-file <ファイル>` (`.dev.vars` と同じ `名前=値` の形式) で一緒に登録できます。シークレットは一度登録すれば以後のデプロイでも引き継がれます。
 - 既存の D1 / R2 を使う場合は、`wrangler.jsonc` に `database_id` / `bucket_name` を追記してください。
-- `main` へ push すると、テストとビルドのあと GitHub Actions がデプロイします。リポジトリの Settings → Secrets and variables → Actions に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を登録してください。トークンは [API Tokens](https://dash.cloudflare.com/profile/api-tokens) の「Edit Cloudflare Workers」で作り、対象アカウントだけに絞ります。D1・Workers R2 Storage の Edit が入っていることを確認してください。Account ID はダッシュボードの Workers 概要に出ます。Workers Builds は接続しないでください。同じ push が二重にデプロイされます。Google ログインのシークレットは GitHub ではなく、上の `wrangler secret put` で Worker に登録します。
+- `main` へ push すると、テストとビルドのあと GitHub Actions がデプロイします。リポジトリの Settings → Secrets and variables → Actions に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を登録してください。トークンは [API Tokens](https://dash.cloudflare.com/profile/api-tokens) の「Edit Cloudflare Workers」で作り、対象アカウントだけに絞ります。D1・Workers R2 Storage の Edit が入っていることを確認してください。Account ID はダッシュボードの Workers 概要に出ます。Workers Builds は接続しないでください。同じ push が二重にデプロイされます。Google ログインと `SETUP_ADMIN_EMAIL` のシークレットは GitHub ではなく、上の `wrangler secret put` で Worker に登録します。
 - 社外からのアクセスを制限したい場合は、Cloudflare Zero Trust の Access でこの Worker のドメインを保護すると、アプリのログインの前に会社の ID で認証できます。
 
 ### パスワードログインからの移行
 
 以前のバージョン (メールアドレスとパスワードでのログイン) からの更新では、デプロイ後の最初のアクセスでパスワードの列が削除され、Google ログインに切り替わります。既存のアカウントは、登録されているメールアドレスと同じ Google アカウントでそのままログインできます。
 
+- セットアップ済みでも `SETUP_ADMIN_EMAIL` はデプロイに必要です。管理者のメールアドレスを登録しておいてください (セットアップ後は使いません)。
 - デプロイ前に、管理者のメールアドレスが Google アカウント (Gmail または Google Workspace) のものか確認してください。そうでない場合は、先に「アカウント」タブで Google アカウントのメールアドレスに変えておきます。
 - 管理者がだれもログインできなくなった場合は、初期セットアップで登録した管理者 (users の id = 1) のメールアドレスを D1 で直接書き換えます: `npx wrangler d1 execute minamo-hr --remote --command "UPDATE users SET email = '<Google アカウントのメールアドレス>' WHERE id = 1"`
 - 使わなくなった KV (以前のログインセッション用) は、Cloudflare ダッシュボードから削除してかまいません。

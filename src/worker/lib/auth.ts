@@ -12,15 +12,27 @@ export function authConfigured(env: Env): boolean {
   return !!(env.BETTER_AUTH_SECRET && env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 }
 
+/** 最初の管理者として指定された Google アカウントのメールアドレス (未設定なら null) */
+export function setupAdminEmail(env: Env): string | null {
+  return env.SETUP_ADMIN_EMAIL?.trim().toLowerCase() || null;
+}
+
 /** ログインを断る理由 (ログインできるなら null)。code は画面に戻すときの ?error= の値 */
 export async function signInDenial(
-  db: D1Database,
+  env: Env,
   email: string,
   emailVerified: boolean,
 ): Promise<{ code: string; message: string } | null> {
+  const db = env.DB;
   if (!emailVerified) return { code: "email_not_verified", message: "Google アカウントのメールアドレスが確認されていません" };
-  // 初期セットアップ前は、最初の管理者になる人がログインできるようにする
-  if (!(await loadCompany(db))) return null;
+  // 初期セットアップ前は、SETUP_ADMIN_EMAIL で指定された人だけがログインできる。
+  // 指定がないと、先に URL にたどり着いた人がだれでも管理者になれてしまう
+  if (!(await loadCompany(db))) {
+    const admin = setupAdminEmail(env);
+    if (!admin) return { code: "setup_admin_not_configured", message: "最初の管理者のメールアドレス (SETUP_ADMIN_EMAIL) が設定されていません" };
+    if (email.toLowerCase() !== admin) return { code: "not_setup_admin", message: "この Google アカウントは最初の管理者として指定されていません" };
+    return null;
+  }
   const row = await first<{ is_active: number; status: string }>(
     db,
     "SELECT u.is_active, e.status FROM users u JOIN employees e ON e.id = u.employee_id WHERE u.email = ?",
@@ -31,8 +43,8 @@ export async function signInDenial(
   return null;
 }
 
-async function assertCanSignIn(db: D1Database, email: string, emailVerified: boolean): Promise<void> {
-  const denial = await signInDenial(db, email, emailVerified);
+async function assertCanSignIn(env: Env, email: string, emailVerified: boolean): Promise<void> {
+  const denial = await signInDenial(env, email, emailVerified);
   if (denial) throw new APIError("FORBIDDEN", denial);
 }
 
@@ -47,7 +59,12 @@ export function createAuth(env: Env, origin: string) {
     database: env.DB,
     user: { modelName: "auth_user" },
     session: { modelName: "auth_session" },
-    account: { modelName: "auth_account" },
+    account: {
+      modelName: "auth_account",
+      // 同じメールアドレスでも、最初にログインした Google アカウント (sub) と別のアカウントは紐付けない。
+      // メールアドレスが別の人に割り当て直されたときに、その人が元の従業員としてログインできないようにする
+      accountLinking: { disableImplicitLinking: true },
+    },
     verification: { modelName: "auth_verification" },
     socialProviders: {
       google: {
@@ -83,7 +100,7 @@ export function createAuth(env: Env, origin: string) {
         create: {
           // 登録されていない Google アカウントは Better Auth のユーザーも作らない
           before: async (user) => {
-            await assertCanSignIn(env.DB, user.email, user.emailVerified);
+            await assertCanSignIn(env, user.email, user.emailVerified);
           },
         },
       },
@@ -95,7 +112,7 @@ export function createAuth(env: Env, origin: string) {
               "SELECT email, emailVerified FROM auth_user WHERE id = ?",
               session.userId,
             );
-            await assertCanSignIn(env.DB, u?.email ?? "", !!u?.emailVerified);
+            await assertCanSignIn(env, u?.email ?? "", !!u?.emailVerified);
           },
           after: async (session) => {
             await run(
@@ -125,6 +142,21 @@ export async function googleSession(c: Ctx) {
   const { headers, response } = await authFor(c).api.getSession({ headers: c.req.raw.headers, returnHeaders: true });
   for (const cookie of headers.getSetCookie()) c.header("Set-Cookie", cookie, { append: true });
   return response;
+}
+
+/**
+ * ログインに使うメールアドレスを変える。古いアドレスの Better Auth のユーザーも消し、セッションと Google アカウントとの紐付けを外す。
+ * セッションはメールアドレスで従業員に結びつくため、残すと古いアドレスでログインしていた人が、
+ * そのアドレスを後から登録された別の従業員として操作できてしまう。
+ * 新しいアドレスが別のアカウントで使われているときは何も変えずに失敗する
+ */
+export async function changeLoginEmail(db: D1Database, employeeId: number, email: string): Promise<void> {
+  const current = await first<{ email: string }>(db, "SELECT email FROM users WHERE employee_id = ?", employeeId);
+  if (!current || current.email === email) return;
+  await db.batch([
+    db.prepare("UPDATE users SET email = ? WHERE employee_id = ?").bind(email, employeeId),
+    db.prepare("DELETE FROM auth_user WHERE email = ?").bind(current.email),
+  ]);
 }
 
 export async function loadSessionUser(db: D1Database, email: string): Promise<SessionUser | null> {

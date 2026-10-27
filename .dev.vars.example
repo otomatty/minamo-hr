@@ -7,3 +7,6 @@ BETTER_AUTH_SECRET=
 # 承認済みのリダイレクト URI に http://localhost:5173/api/auth/callback/google を登録してください
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
+
+# 最初の管理者になる方の Google アカウントのメールアドレス。初期セットアップ前は、このアカウントだけがログインできます
+SETUP_ADMIN_EMAIL=

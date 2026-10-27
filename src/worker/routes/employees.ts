@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { all, buildUpdate, first, insert, run } from "../lib/db";
 import { badRequest, conflict, forbidden, notFound, tzOffset, type AppEnv } from "../lib/context";
-import { requireRole } from "../lib/auth";
+import { changeLoginEmail, requireRole } from "../lib/auth";
 import { audit, canViewEmployee, subordinateIds } from "../domain/common";
 import { autoGrantLeave, leaveBalance } from "../domain/leave";
 import { todayLocal } from "../../shared/dates";
@@ -160,7 +160,7 @@ employeeRoutes.put("/employees/:id", async (c) => {
       await run(c.env.DB, "INSERT INTO personnel_events (employee_id, event_date, event_type, description, created_by) VALUES (?, ?, 'promotion', ?, ?)", id, b.event_date || today, `役職変更: ${after.pn ?? "なし"}`, user.employeeId);
     }
     if (before.email !== after.email && after.email) {
-      await run(c.env.DB, "UPDATE users SET email = ? WHERE employee_id = ?", after.email.toLowerCase(), id).catch(() => undefined);
+      await changeLoginEmail(c.env.DB, id, after.email.toLowerCase()).catch(() => undefined);
     }
   }
   if (user.role === "admin" && ["hire_date", "weekly_work_days", "weekly_work_hours", "status"].some((k) => k in b)) {
@@ -316,7 +316,8 @@ employeeRoutes.post("/employees/:id/account", requireRole("admin"), async (c) =>
       const admins = await first<{ n: number }>(c.env.DB, "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = 1");
       if ((admins?.n ?? 0) <= 1) throw conflict("管理者が1人もいなくなるため変更できません");
     }
-    await run(c.env.DB, "UPDATE users SET email = ?, role = ?, is_active = ? WHERE id = ?", email, role, b.is_active === false ? 0 : 1, existing.id);
+    await changeLoginEmail(c.env.DB, id, email);
+    await run(c.env.DB, "UPDATE users SET role = ?, is_active = ? WHERE id = ?", role, b.is_active === false ? 0 : 1, existing.id);
     await audit(c.env.DB, c.get("user"), "account.update", "employee", id, { role });
     return c.json({ ok: true });
   }
