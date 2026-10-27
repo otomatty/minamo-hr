@@ -31,6 +31,7 @@ export interface DayInput {
   breaks: BreakInterval[];
   dayType: DayType;
   leaves: LeaveOnDay[];
+  nextDayType?: DayType; // 翌日の区分 (日をまたぐ勤務で法定休日にかかる部分を分けるため)
 }
 
 export interface DayResult {
@@ -126,9 +127,9 @@ export function calcDay(input: DayInput, pattern: PatternInfo, today: string): D
 
   if (!input.clockIn) {
     if (input.dayType === "workday" && !fullLeave && input.date < today) {
-      // 半休のみ取得して出勤していない場合は残り半日を欠勤扱いにする
-      if (amLeave || pmLeave) base.unpaidLeaveDays = Math.min(1, base.unpaidLeaveDays + 0.5);
-      else base.absent = true;
+      // 半休を片方だけ取得して出勤していない場合は、残り半日を欠勤扱いにする
+      if (amLeave !== pmLeave) base.unpaidLeaveDays = Math.min(1, base.unpaidLeaveDays + 0.5);
+      else if (!amLeave) base.absent = true;
     }
     return base;
   }
@@ -165,13 +166,27 @@ export function calcDay(input: DayInput, pattern: PatternInfo, today: string): D
   base.workMinutes = work;
   base.lateNightMinutes = Math.max(0, night);
 
+  // 法定休日は暦日 (0:00〜24:00) で判定する。日をまたぐ勤務は 0:00 で分ける
+  const midnight = dateTimeMinutes(input.date, "00:00") + 1440;
+  let afterMidnight = Math.max(0, e - Math.max(s, midnight));
+  for (const [bs, be] of breaks) afterMidnight -= overlap(bs, be, midnight, Infinity);
+  afterMidnight = Math.max(0, afterMidnight);
+  const nextIsLegalHoliday = input.nextDayType === "legal_holiday";
+
   if (input.dayType === "legal_holiday") {
-    base.legalHolidayMinutes = work;
+    const after = nextIsLegalHoliday ? 0 : afterMidnight;
+    base.legalHolidayMinutes = work - after;
+    // 翌日 (法定休日でない日) にかかった部分は通常の時間外として扱う
+    base.nonScheduledMinutes = Math.min(after, LEGAL_DAILY_MINUTES);
+    base.legalOvertime = Math.max(0, after - LEGAL_DAILY_MINUTES);
     return base;
   }
 
-  const legalOT = Math.max(0, work - LEGAL_DAILY_MINUTES);
-  const withinLegal8h = work - legalOT;
+  const holidayPart = nextIsLegalHoliday ? afterMidnight : 0;
+  base.legalHolidayMinutes = holidayPart;
+  const ordinary = work - holidayPart;
+  const legalOT = Math.max(0, ordinary - LEGAL_DAILY_MINUTES);
+  const withinLegal8h = ordinary - legalOT;
   base.legalOvertime = legalOT;
 
   if (input.dayType === "scheduled_off") {

@@ -151,6 +151,15 @@ export function calcPayslip(input: PayrollInput): PayslipData {
     });
   }
 
+  // ── 有給休暇の賃金 (時給・日給制。月給制は基本給に含まれる)
+  if (s.pay_type !== "monthly" && a.paidLeaveDays > 0) {
+    const amt =
+      s.pay_type === "hourly"
+        ? yen((s.hourly_wage * input.scheduledMinutesPerDay * a.paidLeaveDays) / 60)
+        : yen(s.daily_wage * a.paidLeaveDays);
+    payments.push({ code: "paid_leave", name: "有給休暇手当", amount: amt, taxable: true, note: `${a.paidLeaveDays}日 (所定労働時間分)` });
+  }
+
   // ── 手当
   for (const al of s.allowances) {
     if (!al.amount) continue;
@@ -182,8 +191,10 @@ export function calcPayslip(input: PayrollInput): PayslipData {
   // ── 欠勤・遅刻早退控除 (月給制)
   if (s.pay_type === "monthly" && s.absence_deduction) {
     const absent = a.absenceDays + a.unpaidLeaveDays;
-    if (absent > 0 && a.scheduledDays > 0) {
-      const amt = floorYen(((s.base_salary + otBaseAllowances) / a.scheduledDays) * absent);
+    // 1日あたりの控除額は月の所定労働日数で割る (入退社月の日割りでも分母は月全体)
+    const monthDays = input.prorate?.denominator || a.scheduledDays;
+    if (absent > 0 && monthDays > 0) {
+      const amt = floorYen(((s.base_salary + otBaseAllowances) / monthDays) * absent);
       payments.push({ code: "absence", name: "欠勤控除", amount: -amt, taxable: true, note: `${absent}日` });
     }
     const lateEarly = a.lateMinutes + a.earlyLeaveMinutes;
@@ -226,6 +237,7 @@ export function calcPayslip(input: PayrollInput): PayslipData {
     careApplies,
     health: insured && s.health_insurance,
     pension: insured && s.pension_insurance,
+    insuranceMonth: input.insuranceMonth,
   });
   if (si.health) deductions.push({ code: "health", name: "健康保険料", amount: si.health });
   if (si.care) deductions.push({ code: "care", name: "介護保険料", amount: si.care });
@@ -249,6 +261,9 @@ export function calcPayslip(input: PayrollInput): PayslipData {
   const taxBase = Math.max(0, taxable - socialTotal);
   const dependents = Math.max(0, input.dependentsCount + s.tax_dependents_adjust);
   let incomeTax = 0;
+  if (payYear >= 2028 && s.tax_column !== "none") {
+    warnings.push(`${payYear}年分の源泉徴収税額表は未登録のため、令和9年分の算式で計算しています。国税庁の最新の税額表で確認してください`);
+  }
   if (s.tax_column === "kou") incomeTax = withholdingKou(taxBase, dependents, payYear);
   else if (s.tax_column === "otsu") {
     incomeTax = withholdingOtsu(taxBase);

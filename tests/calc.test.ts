@@ -261,3 +261,88 @@ describe("給与計算 (結合)", () => {
     expect(r.totals.net).toBe(r.totals.gross - r.totals.deductions);
   });
 });
+
+describe("レビューで見つかった不具合の回帰テスト", () => {
+  const rates = pickRates(DEFAULT_RATE_ROWS, "2026-10", "2026-10");
+  const baseAttendance = {
+    scheduledDays: 20, workDays: 18, absenceDays: 0, paidLeaveDays: 2, unpaidLeaveDays: 0, holidayWorkDays: 0,
+    totalWorkMinutes: 18 * 480, regularMinutes: 18 * 480, withinLegalOvertime: 0, legalOvertime: 0, legalOvertimeFromRegular: 0,
+    over60Minutes: 0, nonScheduledMinutes: 0, legalHolidayMinutes: 0, lateNightMinutes: 0, lateCount: 0, lateMinutes: 0,
+    earlyLeaveCount: 0, earlyLeaveMinutes: 0, incompleteDays: 0,
+  };
+  const setting = (over: Partial<SalarySetting>): SalarySetting => ({
+    pay_type: "monthly", base_salary: 0, hourly_wage: 0, daily_wage: 0, allowances: [], commute_allowance: 0, other_deductions: [],
+    standard_monthly_remuneration: 0, health_insurance: false, pension_insurance: false, employment_insurance: false, care_insurance: "auto",
+    tax_column: "none", tax_dependents_adjust: 0, resident_tax_june: 0, resident_tax_monthly: 0, absence_deduction: true, ...over,
+  });
+  const run = (s: SalarySetting, attendance = baseAttendance, prorate: { numerator: number; denominator: number } | null = null) =>
+    calcPayslip({
+      employee: { birth_date: "1990-01-01", hire_date: "2020-04-01", leave_date: null, employment_type: "part_time" },
+      setting: s, attendance, workdayWorkDays: attendance.workDays, scheduledMinutesPerDay: 480, monthlyAvgHours: 160,
+      payMonth: "2026-11", payDate: "2026-11-25", insuranceMonth: "2026-10", rates, dependentsCount: 0, prorate, adjustments: [], expenseReimbursement: 0,
+    });
+
+  it("同月得喪: 同じ月に入社・退職した場合もその月の保険料がかかる", () => {
+    expect(insuredInMonth("2026-10-05", "2026-10-20", "2026-10")).toBe(true);
+    expect(insuredInMonth("2026-10-05", "2026-10-20", "2026-11")).toBe(false);
+    expect(insuredInMonth("2026-09-01", "2026-10-20", "2026-10")).toBe(false);
+  });
+  it("時給制: 有給休暇の日も所定労働時間分の賃金を支払う", () => {
+    const r = run(setting({ pay_type: "hourly", hourly_wage: 1500 }));
+    expect(r.payments.find((p) => p.code === "paid_leave")?.amount).toBe(1500 * 8 * 2);
+    expect(r.totals.gross).toBe(1500 * 8 * 20);
+  });
+  it("日給制: 有給休暇の日も日給を支払う", () => {
+    const r = run(setting({ pay_type: "daily", daily_wage: 12000 }));
+    expect(r.totals.gross).toBe(12000 * 20);
+  });
+  it("日割り月の欠勤控除は月全体の所定日数で割る", () => {
+    const att = { ...baseAttendance, scheduledDays: 11, workDays: 10, paidLeaveDays: 0, absenceDays: 1 };
+    const r = run(setting({ base_salary: 300000 }), att, { numerator: 11, denominator: 22 });
+    expect(r.payments.find((p) => p.code === "base")?.amount).toBe(150000);
+    expect(r.payments.find((p) => p.code === "absence")?.amount).toBe(-13636);
+  });
+  it("同じ日に午前休と午後休を取った日は欠勤にならない", () => {
+    const d = calcDay(
+      { date: "2026-10-26", clockIn: null, clockOut: null, breaks: [], dayType: "workday", leaves: [{ unit: "am", paid: true, name: "年休" }, { unit: "pm", paid: true, name: "年休" }] },
+      pattern,
+      "2026-10-27",
+    );
+    expect(d.paidLeaveDays).toBe(1);
+    expect(d.unpaidLeaveDays).toBe(0);
+    expect(d.absent).toBe(false);
+    const half = calcDay({ date: "2026-10-26", clockIn: null, clockOut: null, breaks: [], dayType: "workday", leaves: [{ unit: "am", paid: true, name: "年休" }] }, pattern, "2026-10-27");
+    expect(half.unpaidLeaveDays).toBe(0.5);
+  });
+  it("土曜夜から日曜 (法定休日) にまたぐ勤務は 0時以降が休日労働", () => {
+    const r = calcDay(
+      { date: "2026-10-24", clockIn: "2026-10-24T20:00:00", clockOut: "2026-10-25T04:00:00", breaks: [], dayType: "scheduled_off", nextDayType: "legal_holiday", leaves: [] },
+      pattern,
+      "2026-10-27",
+    );
+    expect(r.workMinutes).toBe(480 - 60); // 6時間超なので自動休憩60分
+    expect(r.legalHolidayMinutes + r.nonScheduledMinutes).toBe(420);
+    expect(r.legalHolidayMinutes).toBeGreaterThan(0);
+  });
+  it("法定休日から翌日にまたぐ勤務は 0時以降を休日労働にしない", () => {
+    const r = calcDay(
+      { date: "2026-10-25", clockIn: "2026-10-25T20:00:00", clockOut: "2026-10-26T02:00:00", breaks: [], dayType: "legal_holiday", nextDayType: "workday", leaves: [] },
+      pattern,
+      "2026-10-27",
+    );
+    expect(r.legalHolidayMinutes).toBe(240);
+    expect(r.nonScheduledMinutes).toBe(120);
+  });
+  it("子ども・子育て支援金は健康保険料と合算して端数処理する", () => {
+    // 410,000 × (9.85 + 1.62 + 0.23)% ÷ 2 = 23,985 (別々に丸めると 23,984)
+    const si = calcSocialInsurance({ standard: 410000, rates, careApplies: true, health: true, pension: false });
+    expect(si.health + si.care + si.childSupport).toBe(23985);
+  });
+  it("厚生年金の標準報酬月額の上限は 2027年9月から 68万円", () => {
+    const before = calcSocialInsurance({ standard: 1000000, rates, careApplies: false, health: false, pension: true, insuranceMonth: "2027-08" });
+    const after = calcSocialInsurance({ standard: 1000000, rates, careApplies: false, health: false, pension: true, insuranceMonth: "2027-09" });
+    expect(before.pension).toBe(halfShare(650000, 18.3));
+    expect(after.pension).toBe(halfShare(680000, 18.3));
+    expect(standardFromRemuneration(700000, "2028-09")).toMatchObject({ pensionStandard: 710000, pensionGrade: 34 });
+  });
+});

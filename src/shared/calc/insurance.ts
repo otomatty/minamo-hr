@@ -18,8 +18,20 @@ export const HEALTH_GRADES: Array<[number, number, number]> = [
 
 export const PENSION_MIN = 88000;
 export const PENSION_MAX = 650000;
+// 令和7年の年金制度改正法 (2025-06-20 公布) による厚生年金の標準報酬月額の上限の引き上げ
+const PENSION_CAP_SCHEDULE: Array<[string, number]> = [
+  ["2029-09", 750000], // 第35級
+  ["2028-09", 710000], // 第34級
+  ["2027-09", 680000], // 第33級
+];
 
-export function standardFromRemuneration(remuneration: number): {
+/** その月 (保険料の対象月) の厚生年金の標準報酬月額の上限 */
+export function pensionMaxFor(insuranceMonth?: string): number {
+  if (!insuranceMonth) return PENSION_MAX;
+  return PENSION_CAP_SCHEDULE.find(([from]) => insuranceMonth >= from)?.[1] ?? PENSION_MAX;
+}
+
+export function standardFromRemuneration(remuneration: number, insuranceMonth?: string): {
   healthGrade: number;
   healthStandard: number;
   pensionGrade: number;
@@ -27,13 +39,13 @@ export function standardFromRemuneration(remuneration: number): {
 } {
   let g = HEALTH_GRADES[0];
   for (const row of HEALTH_GRADES) if (remuneration >= row[2]) g = row;
-  const pensionStandard = pensionStandardOf(g[1]);
+  const pensionStandard = pensionStandardOf(g[1], insuranceMonth);
   const pensionGrade = HEALTH_GRADES.find((r) => r[1] === pensionStandard)![0] - 3;
   return { healthGrade: g[0], healthStandard: g[1], pensionGrade, pensionStandard };
 }
 
-export function pensionStandardOf(healthStandard: number): number {
-  return Math.min(PENSION_MAX, Math.max(PENSION_MIN, healthStandard));
+export function pensionStandardOf(healthStandard: number, insuranceMonth?: string): number {
+  return Math.min(pensionMaxFor(insuranceMonth), Math.max(PENSION_MIN, healthStandard));
 }
 
 export function healthGradeOf(standard: number): number | null {
@@ -78,12 +90,16 @@ export function careInsuranceApplies(birthDate: string | null | undefined, insur
   return insuranceMonth >= monthOf(reach40) && insuranceMonth < monthOf(reach65);
 }
 
-/** 資格取得月〜喪失月の前月 が保険料の対象。喪失日は退職日の翌日。 */
+/**
+ * 資格取得月〜喪失月の前月 が保険料の対象。喪失日は退職日の翌日。
+ * 同じ月に取得と喪失をした場合 (同月得喪) は、その月の保険料がかかる (健保法156条3項・厚年法19条2項)。
+ */
 export function insuredInMonth(hireDate: string, leaveDate: string | null | undefined, insuranceMonth: string): boolean {
-  if (insuranceMonth < monthOf(hireDate)) return false;
+  const hireMonth = monthOf(hireDate);
+  if (insuranceMonth < hireMonth) return false;
   if (leaveDate) {
     const lossMonth = monthOf(addDays(leaveDate, 1));
-    if (insuranceMonth >= lossMonth) return false;
+    if (insuranceMonth >= lossMonth) return lossMonth === hireMonth && insuranceMonth === hireMonth;
   }
   return true;
 }
@@ -114,6 +130,7 @@ export function calcSocialInsurance(opts: {
   careApplies: boolean;
   health: boolean;
   pension: boolean;
+  insuranceMonth?: string;
 }): SocialInsuranceResult {
   const { standard, rates } = opts;
   const r: SocialInsuranceResult = {
@@ -121,19 +138,22 @@ export function calcSocialInsurance(opts: {
     employerHealth: 0, employerCare: 0, employerChildSupport: 0, employerPension: 0,
   };
   if (opts.health && standard > 0) {
-    // 健康保険と介護保険は合算した料率で端数処理し、内訳として介護分を分ける (協会けんぽ保険料額表と一致)
+    // 健康保険料は 標準報酬月額 × (一般保険料率 + 介護保険料率 + 子ども・子育て支援金率) で一つの額 (健保法156条)。
+    // 合算した料率で被保険者負担分を端数処理し、明細の内訳として介護分と支援金分を分ける。
     const careRate = opts.careApplies ? rates.care : 0;
-    const total = halfShare(standard, rates.health + careRate);
-    r.care = opts.careApplies ? halfShare(standard, careRate) : 0;
-    r.health = total - r.care;
-    r.childSupport = rates.child_support > 0 ? halfShare(standard, rates.child_support) : 0;
-    const fullHealth = Math.floor((standard * rateToMilli(rates.health + careRate)) / 100000);
-    r.employerHealth = fullHealth - total;
+    const childRate = rates.child_support > 0 ? rates.child_support : 0;
+    const total = halfShare(standard, rates.health + careRate + childRate);
+    r.care = careRate ? halfShare(standard, careRate) : 0;
+    r.childSupport = childRate ? halfShare(standard, childRate) : 0;
+    r.health = total - r.care - r.childSupport;
+    const full = Math.floor((standard * rateToMilli(rates.health + careRate + childRate)) / 100000);
+    const fullChild = Math.floor((standard * rateToMilli(childRate)) / 100000);
+    r.employerChildSupport = fullChild - r.childSupport;
+    r.employerHealth = full - total - r.employerChildSupport;
     r.employerCare = 0;
-    r.employerChildSupport = Math.floor((standard * rateToMilli(rates.child_support)) / 100000) - r.childSupport;
   }
   if (opts.pension && standard > 0) {
-    const ps = pensionStandardOf(standard);
+    const ps = pensionStandardOf(standard, opts.insuranceMonth);
     r.pension = halfShare(ps, rates.pension);
     r.employerPension = Math.floor((ps * rateToMilli(rates.pension)) / 100000) - r.pension;
   }

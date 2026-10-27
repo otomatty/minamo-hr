@@ -108,6 +108,7 @@ export async function computePeriods(
   }
 
   const dates = eachDay(weekStartDate, end);
+  const nextDates = new Map(dates.map((d) => [d, addDays(d, 1)]));
   for (const emp of employees) {
     const pattern = toPattern(patterns.find((p) => p.id === emp.work_pattern_id) ?? defaultPattern);
     let fullScheduledDays = 0;
@@ -127,6 +128,7 @@ export async function computePeriods(
           breaks,
           dayType,
           leaves: leaveMap.get(`${emp.id}:${date}`) ?? [],
+          nextDayType: dayTypeOf(nextDates.get(date)!, pattern, holidaySet, company.legal_holiday_weekday),
         },
         pattern,
         today,
