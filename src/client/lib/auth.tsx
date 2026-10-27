@@ -11,8 +11,10 @@ export async function signInWithGoogle(): Promise<void> {
   if (error) throw new Error(error.message || "Google ログインを開始できませんでした");
 }
 
+/** 失敗したら例外を投げる (セッションが残ったままログアウトしたように見せない) */
 export async function signOut(): Promise<void> {
-  await authClient.signOut();
+  const res = await authClient.signOut().catch(() => null);
+  if (!res || res.error) throw new Error("ログアウトできませんでした。通信状況を確認して、もう一度お試しください");
 }
 
 export interface Me {
@@ -44,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
   const logout = useCallback(async () => {
-    await signOut().catch(() => undefined);
+    await signOut();
     setMe(null);
   }, []);
   useEffect(() => {

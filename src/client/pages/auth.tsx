@@ -163,8 +163,12 @@ export function SetupPage({ setupEmail, authConfigured }: { setupEmail: string |
                 type="button"
                 className="link ml-1"
                 onClick={async () => {
-                  await signOut().catch(() => undefined);
-                  window.location.replace("/");
+                  try {
+                    await signOut();
+                    window.location.replace("/");
+                  } catch (err: any) {
+                    setError(err.message);
+                  }
                 }}
               >
                 別のアカウントにする

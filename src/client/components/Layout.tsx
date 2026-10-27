@@ -24,6 +24,7 @@ import { api } from "../lib/api";
 import { useQuery } from "../lib/hooks";
 import { dateTimeJa, ROLE_JA } from "../lib/format";
 import { Avatar } from "./ui";
+import { useToast } from "./toast";
 
 interface NavItem {
   to: string;
@@ -49,6 +50,7 @@ function Logo({ name }: { name: string }) {
 export function Layout() {
   const { me, logout } = useAuth();
   const { isAdmin, isManager } = useRole();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
   const counts = useQuery<{ approvals: number }>(`/requests/counts?_=${loc.pathname}`);
@@ -109,7 +111,7 @@ export function Layout() {
           </div>
           <UserRound className="size-4 text-ai-200/60" />
         </NavLink>
-        <button type="button" onClick={logout} className="mt-1 w-full flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] text-ai-200 hover:bg-white/5 hover:text-white">
+        <button type="button" onClick={() => logout().catch((e: Error) => toast.error(e.message))} className="mt-1 w-full flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] text-ai-200 hover:bg-white/5 hover:text-white">
           <LogOut className="size-4" />
           ログアウト
         </button>
