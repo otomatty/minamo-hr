@@ -60,6 +60,14 @@ export function createAuth(env: Env, origin: string) {
         disableIdTokenSignIn: true,
         // Google 側でメールアドレスが変わったら auth_user も合わせる (ログインの可否は最新のメールアドレスで判定する)
         overrideUserInfoOnSignIn: true,
+        // メールアドレスの確認は、ログインのたびに今回の Google の回答で判定する。
+        // 既存ユーザーの emailVerified は「保存済み || 今回」で更新されるため、DB のフックでは見分けられない
+        mapProfileToUser: (profile) => {
+          if (!profile.email_verified) {
+            throw new APIError("FOUND", undefined, new Headers({ location: `${origin}/?error=email_not_verified` }));
+          }
+          return {};
+        },
       },
     },
     // ログインできなかったときはトップに戻し、画面で ?error= の内容を表示する
