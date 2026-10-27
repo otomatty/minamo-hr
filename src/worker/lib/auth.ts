@@ -144,6 +144,21 @@ export async function googleSession(c: Ctx) {
   return response;
 }
 
+/**
+ * ログインに使うメールアドレスを変える。古いアドレスの Better Auth のユーザーも消し、セッションと Google アカウントとの紐付けを外す。
+ * セッションはメールアドレスで従業員に結びつくため、残すと古いアドレスでログインしていた人が、
+ * そのアドレスを後から登録された別の従業員として操作できてしまう。
+ * 新しいアドレスが別のアカウントで使われているときは何も変えずに失敗する
+ */
+export async function changeLoginEmail(db: D1Database, employeeId: number, email: string): Promise<void> {
+  const current = await first<{ email: string }>(db, "SELECT email FROM users WHERE employee_id = ?", employeeId);
+  if (!current || current.email === email) return;
+  await db.batch([
+    db.prepare("UPDATE users SET email = ? WHERE employee_id = ?").bind(email, employeeId),
+    db.prepare("DELETE FROM auth_user WHERE email = ?").bind(current.email),
+  ]);
+}
+
 export async function loadSessionUser(db: D1Database, email: string): Promise<SessionUser | null> {
   const row = await first<any>(
     db,

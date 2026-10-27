@@ -102,6 +102,32 @@ describe("初期セットアップ", () => {
     await expect(createAuthUser(env, "newcomer@gmail.com")).rejects.toMatchObject({ body: { code: "account_not_registered" } });
   });
 
+  it("ログインに使うメールアドレスを変えると、古いアドレスのセッションは別の従業員に引き継がれない", async () => {
+    const hire = { hire_date: "2026-04-01" };
+    const a = (await call(env, "POST", "/api/employees", bossCookie, { code: "0101", last_name: "佐藤", first_name: "花子", ...hire })).json.id;
+    expect((await call(env, "POST", `/api/employees/${a}/account`, bossCookie, { email: "shared@example.co.jp", role: "employee" })).status).toBe(200);
+    const auth = await createAuth(env, ORIGIN).$context;
+    const aCookie = await sessionCookie((await auth.internalAdapter.createSession((await createAuthUser(env, "shared@example.co.jp")).id)).token);
+    expect((await call(env, "GET", "/api/session", aCookie)).json.user).toMatchObject({ name: "佐藤 花子" });
+
+    // 佐藤さんのアドレスを変えてから、同じアドレスを鈴木さんに割り当てる
+    expect((await call(env, "POST", `/api/employees/${a}/account`, bossCookie, { email: "sato@example.co.jp", role: "employee" })).status).toBe(200);
+    const b = (await call(env, "POST", "/api/employees", bossCookie, { code: "0102", last_name: "鈴木", first_name: "一郎", ...hire })).json.id;
+    expect((await call(env, "POST", `/api/employees/${b}/account`, bossCookie, { email: "shared@example.co.jp", role: "employee" })).status).toBe(200);
+    expect((await call(env, "GET", "/api/session", aCookie)).json.user).toBeNull();
+    expect(await count("SELECT COUNT(*) AS n FROM auth_session WHERE token NOT IN ('tok-other')")).toBe(1); // 残っているのは管理者のセッションだけ
+
+    // 鈴木さんは、そのアドレスの Google アカウントでログインできる
+    const bCookie = await sessionCookie((await auth.internalAdapter.createSession((await createAuthUser(env, "shared@example.co.jp")).id)).token);
+    expect((await call(env, "GET", "/api/session", bCookie)).json.user).toMatchObject({ name: "鈴木 一郎" });
+
+    // 従業員情報のメールアドレスを変えたときも同じ
+    expect((await call(env, "PUT", `/api/employees/${b}`, bossCookie, { email: "suzuki@example.co.jp" })).status).toBe(200);
+    expect(await env.DB.prepare("SELECT email FROM users WHERE employee_id = ?").bind(b).first("email")).toBe("suzuki@example.co.jp");
+    expect((await call(env, "GET", "/api/session", bCookie)).json.user).toBeNull();
+    expect(await count("SELECT COUNT(*) AS n FROM auth_user WHERE email = 'shared@example.co.jp'")).toBe(0);
+  });
+
   it("同じメールアドレスでも、最初にログインしたのと別の Google アカウントは紐付けない", async () => {
     const now = new Date().toISOString();
     await env.DB.prepare("INSERT INTO auth_account (id, accountId, providerId, userId, createdAt, updatedAt) VALUES ('acc-boss', 'sub-boss', 'google', ?, ?, ?)")
