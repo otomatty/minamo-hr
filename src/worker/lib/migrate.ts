@@ -39,7 +39,13 @@ export async function ensureMigrated(db: D1Database): Promise<void> {
     if (applied.has(m.name)) continue;
     const stmts = splitSql(m.sql).map((s) => db.prepare(s));
     stmts.push(db.prepare("INSERT OR IGNORE INTO _app_migrations (name) VALUES (?)").bind(m.name));
-    await db.batch(stmts);
+    try {
+      await db.batch(stmts);
+    } catch (err) {
+      // 同時に来た別のリクエストが先に適用していれば成功とみなす (DROP COLUMN などは2回目に失敗する)
+      const done = await db.prepare("SELECT 1 FROM _app_migrations WHERE name = ?").bind(m.name).first();
+      if (!done) throw err;
+    }
   }
   migrated = true;
 }

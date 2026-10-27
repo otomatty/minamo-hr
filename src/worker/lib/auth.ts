@@ -36,6 +36,8 @@ async function assertCanSignIn(db: D1Database, email: string, emailVerified: boo
   if (denial) throw new APIError("FORBIDDEN", denial);
 }
 
+const NO_TOKENS = { accessToken: null, refreshToken: null, idToken: null, accessTokenExpiresAt: null, refreshTokenExpiresAt: null };
+
 export function createAuth(env: Env, origin: string) {
   return betterAuth({
     appName: "ミナモ HR",
@@ -54,12 +56,19 @@ export function createAuth(env: Env, origin: string) {
         // Google Workspace のドメインを指定すると、そのドメインのアカウントだけに限る
         hd: env.GOOGLE_HOSTED_DOMAIN || undefined,
         prompt: "select_account",
+        // ログインはリダイレクトだけで行う。クライアントから送られた ID トークンでのログインは受け付けない
+        disableIdTokenSignIn: true,
       },
     },
     // ログインできなかったときはトップに戻し、画面で ?error= の内容を表示する
     onAPIError: { errorURL: `${origin}/` },
     advanced: { ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
     databaseHooks: {
+      // Google のトークンはログインの確認にしか使わないので保存しない
+      account: {
+        create: { before: async (account) => ({ data: { ...account, ...NO_TOKENS } }) },
+        update: { before: async (account) => ({ data: { ...account, ...NO_TOKENS } }) },
+      },
       user: {
         create: {
           // 登録されていない Google アカウントは Better Auth のユーザーも作らない
