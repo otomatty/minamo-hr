@@ -58,6 +58,8 @@ export function createAuth(env: Env, origin: string) {
         prompt: "select_account",
         // ログインはリダイレクトだけで行う。クライアントから送られた ID トークンでのログインは受け付けない
         disableIdTokenSignIn: true,
+        // Google 側でメールアドレスが変わったら auth_user も合わせる (ログインの可否は最新のメールアドレスで判定する)
+        overrideUserInfoOnSignIn: true,
       },
     },
     // ログインできなかったときはトップに戻し、画面で ?error= の内容を表示する
