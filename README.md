@@ -60,7 +60,7 @@ npm run deploy
 デプロイ後に表示される URL を開き、初期セットアップを行ってください。スキーマは最初のアクセスで自動作成されます。
 
 - 既存の D1 / KV / R2 を使う場合は、`wrangler.jsonc` に `database_id` / `id` / `bucket_name` を追記してください。
-- GitHub と連携して自動デプロイしたい場合は、Cloudflare ダッシュボードの Workers & Pages → このリポジトリを接続 (Workers Builds)。ビルドコマンド `npm run build`、デプロイコマンド `npx wrangler deploy` を指定します。
+- `main` へ push すると、テストとビルドのあと GitHub Actions がデプロイします。リポジトリの Settings → Secrets and variables → Actions に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を登録してください。トークンは [API Tokens](https://dash.cloudflare.com/profile/api-tokens) の「Edit Cloudflare Workers」で作り、対象アカウントだけに絞ります。D1・Workers KV Storage・Workers R2 Storage の Edit が入っていることを確認してください。Account ID はダッシュボードの Workers 概要に出ます。Workers Builds は接続しないでください。同じ push が二重にデプロイされます。
 - 社外からのアクセスを制限したい場合は、Cloudflare Zero Trust の Access でこの Worker のドメインを保護すると、アプリのログインの前に会社の ID で認証できます。
 
 ## 法定の料率・税額について
