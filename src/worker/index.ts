@@ -4,7 +4,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { HTTPException } from "hono/http-exception";
 import { HttpError, tzOffset, type AppEnv } from "./lib/context";
 import { ensureMigrated } from "./lib/migrate";
-import { requireAuth } from "./lib/auth";
+import { authFor, requireAuth } from "./lib/auth";
 import { authRoutes } from "./routes/auth";
 import { employeeRoutes } from "./routes/employees";
 import { attendanceRoutes } from "./routes/attendance";
@@ -35,7 +35,10 @@ app.onError((err, c) => {
 
 app.get("/health", (c) => c.json({ ok: true }));
 
-// 認証不要: セットアップ・ログイン
+// Better Auth: Google ログイン (/api/auth/sign-in/social, /api/auth/callback/google)、ログアウトなど
+app.on(["GET", "POST"], "/auth/*", (c) => authFor(c).handler(c.req.raw));
+
+// 認証不要: セットアップ・ログイン中のユーザー
 app.route("/", authRoutes);
 
 // 以降はログイン必須

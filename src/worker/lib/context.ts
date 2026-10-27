@@ -8,12 +8,11 @@ export interface SessionUser {
   role: Role;
   email: string;
   name: string;
-  mustChangePassword: boolean;
 }
 
 export type AppEnv = {
   Bindings: Env;
-  Variables: { user: SessionUser; sessionId: string };
+  Variables: { user: SessionUser };
 };
 
 export type Ctx = Context<AppEnv>;

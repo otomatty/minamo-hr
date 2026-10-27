@@ -139,11 +139,6 @@ export function Layout() {
           <div className="flex-1" />
           <Notifications />
         </header>
-        {me?.user.mustChangePassword && (
-          <div className="bg-warn-bg text-warn text-[13px] px-4 lg:px-8 py-2 no-print">
-            初期パスワードのままです。<NavLink to="/me" className="underline">マイページ</NavLink>からパスワードを変更してください。
-          </div>
-        )}
         <main className="flex-1 px-4 lg:px-8 py-6 max-w-[1280px] w-full">
           <Outlet />
         </main>

@@ -12,7 +12,7 @@
     "run_worker_first": ["/api/*"]
   },
 
-  // ID を書かずにおくと、初回の `wrangler deploy` で D1 / KV / R2 が自動作成されます
+  // ID を書かずにおくと、初回の `wrangler deploy` で D1 / R2 が自動作成されます
   // (Automatic resource provisioning)。既存リソースを使う場合は ID を追記してください。
   "d1_databases": [
     {
@@ -21,13 +21,19 @@
       "migrations_dir": "migrations"
     }
   ],
-  "kv_namespaces": [{ "binding": "SESSIONS" }],
   "r2_buckets": [{ "binding": "FILES" }],
 
   // 毎日 0:05 (JST) に有休の自動付与・在籍ステータス更新を実行
   "triggers": { "crons": ["5 15 * * *"] },
 
   "vars": {
-    "APP_TIMEZONE_OFFSET_MINUTES": "540"
+    "APP_TIMEZONE_OFFSET_MINUTES": "540",
+    // Google Workspace のドメイン (例: "example.co.jp") を書くと、そのドメインのアカウントだけがログインできます
+    "GOOGLE_HOSTED_DOMAIN": ""
+  },
+
+  // Google ログイン (Better Auth) 用。`npx wrangler secret put <名前>` で登録します (ローカルは .dev.vars)
+  "secrets": {
+    "required": ["BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
   }
 }

@@ -1,0 +1,9 @@
+# ローカル開発用。このファイルを .dev.vars にコピーして値を入れてください (.dev.vars は git に入りません)
+
+# セッションの署名に使う乱数 (32文字以上)。例: openssl rand -base64 32
+BETTER_AUTH_SECRET=
+
+# Google Cloud コンソールで作った OAuth クライアント (ウェブ アプリケーション)
+# 承認済みのリダイレクト URI に http://localhost:5173/api/auth/callback/google を登録してください
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
