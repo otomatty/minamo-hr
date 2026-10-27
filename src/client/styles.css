@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+
+  /* 藍 (ai): ブランドの主色。サイドバーと主要ボタン */
+  --color-ai-950: #0f2238;
+  --color-ai-900: #142b47;
+  --color-ai-800: #1c3a5e;
+  --color-ai-700: #24496f;
+  --color-ai-600: #2d5a87;
+  --color-ai-200: #c4d3e6;
+  --color-ai-100: #e3eaf3;
+  --color-ai-50: #f1f5fa;
+
+  /* 浅葱 (asagi): 勤務時間帯・リンク */
+  --color-asagi-700: #236472;
+  --color-asagi-600: #2f7f8f;
+  --color-asagi-400: #6fb3bf;
+  --color-asagi-100: #ddeff2;
+
+  /* 山吹 (yamabuki): 休暇 */
+  --color-yamabuki-600: #b88418;
+  --color-yamabuki-100: #f8ecd2;
+
+  --color-ink: #1e2530;
+  --color-ink-2: #4a5565;
+  --color-ink-3: #7a8494;
+  --color-line: #dce1e8;
+  --color-line-2: #eceff3;
+  --color-surface: #f5f7f9;
+
+  --color-ok: #2e7d4f;
+  --color-ok-bg: #e4f2e9;
+  --color-warn: #9a6200;
+  --color-warn-bg: #fbf0d9;
+  --color-ng: #b8392b;
+  --color-ng-bg: #f9e3e0;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-surface text-ink antialiased;
+    font-size: 14px;
+    line-height: 1.6;
+    font-feature-settings: "palt" 0;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-asagi-600);
+    outline-offset: 2px;
+  }
+  h1, h2, h3 {
+    line-height: 1.35;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-[5px] border px-3.5 h-9 text-[13px] font-medium whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-sm { @apply h-7 px-2.5 text-xs; }
+  .btn-lg { @apply h-11 px-5 text-sm; }
+  .btn-primary { @apply bg-ai-800 border-ai-800 text-white hover:bg-ai-700; }
+  .btn-secondary { @apply bg-white border-line text-ink hover:bg-ai-50 hover:border-ai-200; }
+  .btn-ghost { @apply border-transparent text-ink-2 hover:bg-ai-50 hover:text-ink; }
+  .btn-danger { @apply bg-white border-ng/40 text-ng hover:bg-ng-bg; }
+  .btn-ok { @apply bg-ok border-ok text-white hover:brightness-110; }
+
+  .input {
+    @apply w-full h-9 rounded-[4px] border border-line bg-white px-2.5 text-[13px] text-ink placeholder:text-ink-3 focus:border-asagi-600 focus:outline-none focus:ring-2 focus:ring-asagi-100 disabled:bg-surface disabled:text-ink-3;
+  }
+  textarea.input { @apply h-auto py-2 min-h-20; }
+  select.input { @apply pr-7; }
+  .label { @apply block text-xs font-medium text-ink-2 mb-1; }
+
+  .panel { @apply bg-white border border-line rounded-md; }
+  .panel-head { @apply flex items-center justify-between gap-3 px-4 py-3 border-b border-line-2; }
+  .panel-title { @apply text-[14px] font-semibold text-ink; }
+
+  .table { @apply w-full text-[13px] border-collapse; }
+  .table th { @apply text-left font-medium text-ink-3 text-xs px-3 py-2 border-b border-line bg-surface/60 whitespace-nowrap; }
+  .table td { @apply px-3 py-2.5 border-b border-line-2 align-middle; }
+  .table tbody tr:hover td { @apply bg-ai-50/60; }
+  .table .r { @apply text-right; }
+
+  .pill { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap; }
+
+  .link { @apply text-asagi-700 hover:underline underline-offset-2; }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+  .print-area { border: none !important; box-shadow: none !important; }
+}
