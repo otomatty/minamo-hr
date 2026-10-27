@@ -32,8 +32,9 @@
     "GOOGLE_HOSTED_DOMAIN": ""
   },
 
-  // Google ログイン (Better Auth) 用。`npx wrangler secret put <名前>` で登録します (ローカルは .dev.vars)
+  // Google ログイン (Better Auth) と初期セットアップ用。`npx wrangler secret put <名前>` で登録します (ローカルは .dev.vars)
+  // SETUP_ADMIN_EMAIL は最初の管理者になる Google アカウントのメールアドレス。セットアップ前は、この人だけがログインできます
   "secrets": {
-    "required": ["BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
+    "required": ["BETTER_AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SETUP_ADMIN_EMAIL"]
   }
 }

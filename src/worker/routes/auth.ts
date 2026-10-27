@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { all, first, insert, run } from "../lib/db";
-import { badRequest, conflict, HttpError, tzOffset, type AppEnv } from "../lib/context";
-import { authConfigured, googleSession, optionalUser, requireAuth } from "../lib/auth";
+import { all, first, run } from "../lib/db";
+import { badRequest, conflict, forbidden, HttpError, tzOffset, type AppEnv } from "../lib/context";
+import { authConfigured, googleSession, optionalUser, requireAuth, setupAdminEmail, signInDenial } from "../lib/auth";
 import { masterDataStatements } from "../lib/defaults";
 import { loadCompany } from "../domain/common";
 import { todayLocal } from "../../shared/dates";
@@ -12,54 +12,65 @@ export const authRoutes = new Hono<AppEnv>();
 
 authRoutes.get("/setup/status", async (c) => {
   const company = await loadCompany(c.env.DB);
-  // セットアップ前は、Google でログイン済みならそのメールアドレスを返す (最初の管理者になる)
+  // セットアップ前は、指定された管理者の Google アカウントでログイン済みならそのメールアドレスを返す
   const session = company ? null : await googleSession(c);
+  const admin = setupAdminEmail(c.env);
   return c.json({
     needsSetup: !company,
     appName: company?.app_name ?? "ミナモ",
     companyName: company?.name ?? null,
     authConfigured: authConfigured(c.env),
-    setupEmail: session?.user.email ?? null,
+    setupAdminConfigured: !!admin,
+    setupEmail: session && session.user.email.toLowerCase() === admin ? session.user.email : null,
   });
 });
 
-/** 初期セットアップ: 会社と最初の管理者を作成。管理者は Google でログインしている本人 */
+/** 初期セットアップ: 会社と最初の管理者を作成。管理者は SETUP_ADMIN_EMAIL の Google アカウントでログインしている本人 */
 authRoutes.post("/setup", async (c) => {
   if (await loadCompany(c.env.DB)) throw conflict("セットアップは完了しています");
   const session = await googleSession(c);
   if (!session) throw new HttpError(401, "Google アカウントでログインしてください");
+  const email = session.user.email.toLowerCase();
+  // ログインのときにも確かめているが、SETUP_ADMIN_EMAIL を後から変えた場合に古いセッションで登録できないよう、ここでも確かめる
+  const denial = await signInDenial(c.env, email, !!session.user.emailVerified);
+  if (denial) throw forbidden(denial.message);
   const b = await c.req.json<any>();
   const companyName = String(b.companyName ?? "").trim();
   const lastName = String(b.lastName ?? "").trim();
   const firstName = String(b.firstName ?? "").trim();
-  const email = session.user.email.toLowerCase();
   if (!companyName || !lastName || !firstName) throw badRequest("会社名と氏名を入力してください");
 
   const db = c.env.DB;
   const today = todayLocal(tzOffset(c.env));
-  await db.batch([
-    db.prepare("INSERT INTO company (id, name) VALUES (1, ?)").bind(companyName),
-    ...masterDataStatements(db),
-    db.prepare("INSERT INTO departments (name, code, sort_order) VALUES ('人事総務部', 'HR', 0)"),
-  ]);
-  const dept = await first<{ id: number }>(db, "SELECT id FROM departments ORDER BY id LIMIT 1");
-  const pattern = await first<{ id: number }>(db, "SELECT id FROM work_patterns WHERE is_default = 1");
-  const position = await first<{ id: number }>(db, "SELECT id FROM positions WHERE name = '部長'");
-  const empId = await insert(
-    db,
-    `INSERT INTO employees (code, last_name, first_name, email, hire_date, department_id, position_id, work_pattern_id)
-     VALUES ('0001', ?, ?, ?, ?, ?, ?, ?)`,
-    lastName,
-    firstName,
-    email,
-    b.hireDate || today,
-    dept?.id ?? null,
-    position?.id ?? null,
-    pattern?.id ?? null,
-  );
-  await run(db, "UPDATE departments SET head_employee_id = ? WHERE id = ?", empId, dept?.id ?? 0);
-  await run(db, "INSERT INTO personnel_events (employee_id, event_date, event_type, description) VALUES (?, ?, 'hire', '入社')", empId, b.hireDate || today);
-  await run(db, "INSERT INTO users (employee_id, email, role, last_login_at) VALUES (?, ?, 'admin', datetime('now'))", empId, email);
+  const hireDate = b.hireDate || today;
+  // 会社から最初の管理者までを1つのトランザクションで作る。途中で失敗して「会社はあるが管理者がいない」状態にしない。
+  // 同時に2回送られても、company の id = 1 が重なるので後のほうは丸ごと失敗する
+  const adminEmployee = "(SELECT id FROM employees WHERE code = '0001')";
+  try {
+    await db.batch([
+      db.prepare("INSERT INTO company (id, name) VALUES (1, ?)").bind(companyName),
+      ...masterDataStatements(db),
+      db.prepare("INSERT INTO departments (name, code, sort_order) VALUES ('人事総務部', 'HR', 0)"),
+      db
+        .prepare(
+          `INSERT INTO employees (code, last_name, first_name, email, hire_date, department_id, position_id, work_pattern_id)
+           VALUES ('0001', ?, ?, ?, ?,
+                   (SELECT id FROM departments WHERE code = 'HR'),
+                   (SELECT id FROM positions WHERE name = '部長'),
+                   (SELECT id FROM work_patterns WHERE is_default = 1))`,
+        )
+        .bind(lastName, firstName, email, hireDate),
+      db.prepare(`UPDATE departments SET head_employee_id = ${adminEmployee} WHERE code = 'HR'`),
+      db
+        .prepare(`INSERT INTO personnel_events (employee_id, event_date, event_type, description) VALUES (${adminEmployee}, ?, 'hire', '入社')`)
+        .bind(hireDate),
+      db.prepare(`INSERT INTO users (employee_id, email, role, last_login_at) VALUES (${adminEmployee}, ?, 'admin', datetime('now'))`).bind(email),
+    ]);
+  } catch (err) {
+    if (await loadCompany(db)) throw conflict("セットアップは完了しています");
+    throw err;
+  }
+  const empId = (await first<{ id: number }>(db, "SELECT id FROM employees WHERE code = '0001'"))!.id;
   if (b.withSampleData) await seedSampleData(db, empId, today);
   await autoGrantLeave(db, today);
   return c.json({ ok: true });

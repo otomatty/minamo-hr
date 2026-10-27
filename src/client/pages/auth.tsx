@@ -38,6 +38,9 @@ const LOGIN_ERRORS: Record<string, string> = {
   account_not_registered: "この Google アカウントは登録されていません。ログインに使うメールアドレスの登録を、人事労務の担当者に依頼してください。",
   account_disabled: "このアカウントは利用できません。人事労務の担当者に確認してください。",
   email_not_verified: "Google アカウントのメールアドレスが確認されていません。",
+  account_not_linked: "このメールアドレスは、以前に別の Google アカウントでログインに使われています。人事労務の担当者に確認してください。",
+  not_setup_admin: "この Google アカウントは最初の管理者として指定されていません。SETUP_ADMIN_EMAIL に設定したメールアドレスの Google アカウントでログインしてください。",
+  setup_admin_not_configured: "最初の管理者のメールアドレス (SETUP_ADMIN_EMAIL) が設定されていません。",
   access_denied: "Google でのログインがキャンセルされました。",
   unable_to_get_user_info: "Google アカウントの情報を取得できませんでした。会社の Google アカウントでログインしているか確認してください。",
 };
@@ -108,7 +111,23 @@ export function LoginPage({ appName, authConfigured }: { appName: string; authCo
   );
 }
 
-export function SetupPage({ setupEmail, authConfigured }: { setupEmail: string | null; authConfigured: boolean }) {
+function SetupAdminNotConfigured() {
+  return (
+    <p className="text-[13px] text-warn bg-warn-bg rounded-md px-3 py-2" role="alert">
+      最初の管理者のメールアドレスがまだ設定されていません。管理者になる方の Google アカウントのメールアドレスを SETUP_ADMIN_EMAIL に設定してください (README の「Google ログインの設定」)。
+    </p>
+  );
+}
+
+export function SetupPage({
+  setupEmail,
+  authConfigured,
+  setupAdminConfigured,
+}: {
+  setupEmail: string | null;
+  authConfigured: boolean;
+  setupAdminConfigured: boolean;
+}) {
   const [f, setF] = useState({ companyName: "", lastName: "", firstName: "", withSampleData: true });
   const [error, setError] = useLoginError();
   const [busy, setBusy] = useState(false);
@@ -129,11 +148,12 @@ export function SetupPage({ setupEmail, authConfigured }: { setupEmail: string |
     return (
       <Shell wide>
         <h1 className="text-xl font-semibold">はじめに会社と管理者を登録します</h1>
-        <p className="text-[13px] text-ink-3 mt-1">最初の管理者になる方の Google アカウントでログインしてください。従業員は後から追加できます。</p>
+        <p className="text-[13px] text-ink-3 mt-1">最初の管理者として指定された方の Google アカウントでログインしてください。従業員は後から追加できます。</p>
         <div className="mt-6 space-y-4">
           {!authConfigured && <NotConfigured />}
+          {authConfigured && !setupAdminConfigured && <SetupAdminNotConfigured />}
           {error && <p className="text-[13px] text-ng" role="alert">{error}</p>}
-          <GoogleButton disabled={!authConfigured} onError={setError} />
+          <GoogleButton disabled={!authConfigured || !setupAdminConfigured} onError={setError} />
         </div>
       </Shell>
     );
