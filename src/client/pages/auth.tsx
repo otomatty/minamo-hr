@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { api } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { signInWithGoogle, signOut } from "../lib/auth";
 import { Button, Checkbox, Field, Input } from "../components/ui";
 
 function Shell({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
@@ -24,7 +24,7 @@ function Shell({ children, wide }: { children: React.ReactNode; wide?: boolean }
           <p className="text-2xl leading-snug text-white font-semibold">勤怠、申請、給与を<br />ひとつの流れに。</p>
           <p className="mt-4 text-[13px] text-ai-200 leading-relaxed">打刻から月次の締め、承認、給与明細の配信までを一つの画面で扱う人事労務システムです。</p>
         </div>
-        <div className="relative text-[11px] text-ai-200/60">Cloudflare Workers / D1 / R2 / KV で動作</div>
+        <div className="relative text-[11px] text-ai-200/60">Cloudflare Workers / D1 / R2 で動作</div>
       </div>
       <div className="flex items-center justify-center p-6">
         <div className={`w-full ${wide ? "max-w-lg" : "max-w-sm"}`}>{children}</div>
@@ -33,50 +33,84 @@ function Shell({ children, wide }: { children: React.ReactNode; wide?: boolean }
   );
 }
 
-export function LoginPage({ appName }: { appName: string }) {
-  const { refresh } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+// Better Auth が ?error= で返すコード
+const LOGIN_ERRORS: Record<string, string> = {
+  account_not_registered: "この Google アカウントは登録されていません。ログインに使うメールアドレスの登録を、人事労務の担当者に依頼してください。",
+  account_disabled: "このアカウントは利用できません。人事労務の担当者に確認してください。",
+  email_not_verified: "Google アカウントのメールアドレスが確認されていません。",
+  access_denied: "Google でのログインがキャンセルされました。",
+  unable_to_get_user_info: "Google アカウントの情報を取得できませんでした。会社の Google アカウントでログインしているか確認してください。",
+};
+
+/** Google ログインから戻ってきたときのエラー。表示したら URL からは消す */
+function useLoginError() {
+  const [error, setError] = useState<string | null>(() => {
+    const code = new URLSearchParams(window.location.search).get("error");
+    if (!code) return null;
+    window.history.replaceState(null, "", window.location.pathname);
+    return LOGIN_ERRORS[code] ?? `ログインできませんでした${/^[\w-]{1,64}$/.test(code) ? ` (${code})` : ""}。もう一度お試しください。`;
+  });
+  return [error, setError] as const;
+}
+
+function GoogleButton({ disabled, onError }: { disabled?: boolean; onError: (message: string) => void }) {
   const [busy, setBusy] = useState(false);
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.post("/auth/login", { email, password });
-      await refresh();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  return (
+    <Button
+      size="lg"
+      className="w-full gap-3"
+      loading={busy}
+      disabled={disabled}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await signInWithGoogle();
+        } catch (err: any) {
+          onError(err.message);
+          setBusy(false);
+        }
+      }}
+    >
+      {!busy && (
+        <svg viewBox="0 0 48 48" className="size-[18px]" aria-hidden>
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+        </svg>
+      )}
+      Google でログイン
+    </Button>
+  );
+}
+
+function NotConfigured() {
+  return (
+    <p className="text-[13px] text-warn bg-warn-bg rounded-md px-3 py-2" role="alert">
+      Google ログインがまだ設定されていません。BETTER_AUTH_SECRET・GOOGLE_CLIENT_ID・GOOGLE_CLIENT_SECRET を設定してください (README の「Google ログインの設定」)。
+    </p>
+  );
+}
+
+export function LoginPage({ appName, authConfigured }: { appName: string; authConfigured: boolean }) {
+  const [error, setError] = useLoginError();
   return (
     <Shell>
       <h1 className="text-xl font-semibold">{appName} にログイン</h1>
-      <p className="text-[13px] text-ink-3 mt-1">会社から案内されたメールアドレスとパスワードを入力してください。</p>
-      <form onSubmit={submit} className="mt-6 space-y-4">
-        <Field label="メールアドレス">
-          <Input type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
-        </Field>
-        <Field label="パスワード">
-          <Input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
-        </Field>
+      <p className="text-[13px] text-ink-3 mt-1">会社から登録された Google アカウントでログインしてください。</p>
+      <div className="mt-6 space-y-4">
+        {!authConfigured && <NotConfigured />}
         {error && <p className="text-[13px] text-ng" role="alert">{error}</p>}
-        <Button type="submit" variant="primary" size="lg" className="w-full" loading={busy}>
-          ログイン
-        </Button>
-        <p className="text-[12px] text-ink-3">パスワードを忘れた場合は、人事労務の担当者にリセットを依頼してください。</p>
-      </form>
+        <GoogleButton disabled={!authConfigured} onError={setError} />
+        <p className="text-[12px] text-ink-3">ログインできない場合は、人事労務の担当者に、ログインに使う Google アカウントのメールアドレスを伝えてください。</p>
+      </div>
     </Shell>
   );
 }
 
-export function SetupPage() {
-  const { refresh } = useAuth();
-  const [f, setF] = useState({ companyName: "", lastName: "", firstName: "", email: "", password: "", withSampleData: true });
-  const [error, setError] = useState<string | null>(null);
+export function SetupPage({ setupEmail, authConfigured }: { setupEmail: string | null; authConfigured: boolean }) {
+  const [f, setF] = useState({ companyName: "", lastName: "", firstName: "", withSampleData: true });
+  const [error, setError] = useLoginError();
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   const submit = async (e: FormEvent) => {
@@ -86,12 +120,24 @@ export function SetupPage() {
     try {
       await api.post("/setup", f);
       window.location.replace("/");
-      await refresh();
     } catch (err: any) {
       setError(err.message);
       setBusy(false);
     }
   };
+  if (!setupEmail) {
+    return (
+      <Shell wide>
+        <h1 className="text-xl font-semibold">はじめに会社と管理者を登録します</h1>
+        <p className="text-[13px] text-ink-3 mt-1">最初の管理者になる方の Google アカウントでログインしてください。従業員は後から追加できます。</p>
+        <div className="mt-6 space-y-4">
+          {!authConfigured && <NotConfigured />}
+          {error && <p className="text-[13px] text-ng" role="alert">{error}</p>}
+          <GoogleButton disabled={!authConfigured} onError={setError} />
+        </div>
+      </Shell>
+    );
+  }
   return (
     <Shell wide>
       <h1 className="text-xl font-semibold">はじめに会社と管理者を登録します</h1>
@@ -108,15 +154,33 @@ export function SetupPage() {
             <Input required value={f.firstName} onChange={set("firstName")} />
           </Field>
         </div>
-        <Field label="メールアドレス (ログインID)" required>
-          <Input type="email" required value={f.email} onChange={set("email")} autoComplete="username" />
-        </Field>
-        <Field label="パスワード" required hint="8文字以上で、英字と数字を含めてください">
-          <Input type="password" required value={f.password} onChange={set("password")} autoComplete="new-password" />
+        <Field
+          label="管理者の Google アカウント"
+          hint={
+            <>
+              このアカウントでログインします。
+              <button
+                type="button"
+                className="link ml-1"
+                onClick={async () => {
+                  try {
+                    await signOut();
+                    window.location.replace("/");
+                  } catch (err: any) {
+                    setError(err.message);
+                  }
+                }}
+              >
+                別のアカウントにする
+              </button>
+            </>
+          }
+        >
+          <Input value={setupEmail} disabled />
         </Field>
         <Checkbox
           label="サンプルデータを入れる"
-          hint="架空の部署・従業員・勤怠・申請を登録して、すぐに操作を試せるようにします。サンプル従業員のパスワードは demo1234 です。"
+          hint="架空の部署・従業員・勤怠・申請を登録して、すぐに操作を試せるようにします。サンプル従業員のメールアドレスは example.com の架空のものなので、ログインはできません。"
           checked={f.withSampleData}
           onChange={(v) => setF({ ...f, withSampleData: v })}
         />

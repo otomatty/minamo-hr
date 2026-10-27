@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { all, buildUpdate, first, insert, run } from "../lib/db";
 import { badRequest, conflict, forbidden, notFound, tzOffset, type AppEnv } from "../lib/context";
-import { hashPassword, randomPassword, requireRole } from "../lib/auth";
+import { requireRole } from "../lib/auth";
 import { audit, canViewEmployee, subordinateIds } from "../domain/common";
 import { autoGrantLeave, leaveBalance } from "../domain/leave";
 import { todayLocal } from "../../shared/dates";
@@ -100,7 +100,7 @@ employeeRoutes.get("/employees/:id", async (c) => {
     all(c.env.DB, "SELECT * FROM dependents WHERE employee_id = ? ORDER BY is_spouse DESC, birth_date", id),
     all(c.env.DB, "SELECT * FROM personnel_events WHERE employee_id = ? ORDER BY event_date DESC, id DESC", id),
     all(c.env.DB, "SELECT id, category, name, content_type, size, created_at FROM employee_files WHERE employee_id = ? ORDER BY id DESC", id),
-    first<any>(c.env.DB, "SELECT id, email, role, is_active, last_login_at, must_change_password FROM users WHERE employee_id = ?", id),
+    first<any>(c.env.DB, "SELECT id, email, role, is_active, last_login_at FROM users WHERE employee_id = ?", id),
   ]);
   const leave = await leaveBalance(c.env.DB, id, todayLocal(tzOffset(c.env)));
   return c.json({ employee: base, dependents, events, files, account, leave, limited: false });
@@ -320,21 +320,10 @@ employeeRoutes.post("/employees/:id/account", requireRole("admin"), async (c) =>
     await audit(c.env.DB, c.get("user"), "account.update", "employee", id, { role });
     return c.json({ ok: true });
   }
-  const password = randomPassword();
-  await insert(c.env.DB, "INSERT INTO users (employee_id, email, password_hash, role, must_change_password) VALUES (?, ?, ?, ?, 1)", id, email, await hashPassword(password), role);
+  await insert(c.env.DB, "INSERT INTO users (employee_id, email, role) VALUES (?, ?, ?)", id, email, role);
   if (!emp.email) await run(c.env.DB, "UPDATE employees SET email = ? WHERE id = ?", email, id);
   await audit(c.env.DB, c.get("user"), "account.create", "employee", id, { role });
-  return c.json({ ok: true, initialPassword: password });
-});
-
-employeeRoutes.post("/employees/:id/account/reset-password", requireRole("admin"), async (c) => {
-  const id = Number(c.req.param("id"));
-  const u = await first<any>(c.env.DB, "SELECT id FROM users WHERE employee_id = ?", id);
-  if (!u) throw notFound("アカウントがありません");
-  const password = randomPassword();
-  await run(c.env.DB, "UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?", await hashPassword(password), u.id);
-  await audit(c.env.DB, c.get("user"), "account.reset_password", "employee", id);
-  return c.json({ ok: true, initialPassword: password });
+  return c.json({ ok: true });
 });
 
 // ── 組織

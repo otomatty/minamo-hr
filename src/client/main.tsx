@@ -29,16 +29,16 @@ const SettingsPage = lazy(() => import("./pages/admin/settings").then((m) => ({ 
 
 function Gate() {
   const { me, loading } = useAuth();
-  const [setup, setSetup] = useState<{ needsSetup: boolean; appName: string } | null>(null);
+  const [setup, setSetup] = useState<{ needsSetup: boolean; appName: string; authConfigured: boolean; setupEmail: string | null } | null>(null);
   useEffect(() => {
-    api.get("/setup/status").then(setSetup).catch(() => setSetup({ needsSetup: false, appName: "ミナモ" }));
+    api.get("/setup/status").then(setSetup).catch(() => setSetup({ needsSetup: false, appName: "ミナモ", authConfigured: true, setupEmail: null }));
   }, []);
   useEffect(() => {
     document.title = `${me?.company?.appName ?? setup?.appName ?? "ミナモ"} HR`;
   }, [me, setup]);
   if (loading || !setup) return <Spinner />;
-  if (setup.needsSetup) return <SetupPage />;
-  if (!me) return <LoginPage appName={setup.appName} />;
+  if (setup.needsSetup) return <SetupPage setupEmail={setup.setupEmail} authConfigured={setup.authConfigured} />;
+  if (!me) return <LoginPage appName={setup.appName} authConfigured={setup.authConfigured} />;
   return <AppRoutes />;
 }
 

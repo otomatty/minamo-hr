@@ -1,7 +1,11 @@
 // 起動時にスキーマを自動適用する (wrangler d1 migrations apply を実行しなくてもデプロイだけで動くように)
 import init0001 from "../../../migrations/0001_init.sql?raw";
+import googleLogin0002 from "../../../migrations/0002_google_login.sql?raw";
 
-const MIGRATIONS: Array<{ name: string; sql: string }> = [{ name: "0001_init.sql", sql: init0001 }];
+const MIGRATIONS: Array<{ name: string; sql: string }> = [
+  { name: "0001_init.sql", sql: init0001 },
+  { name: "0002_google_login.sql", sql: googleLogin0002 },
+];
 
 let migrated = false;
 
@@ -35,7 +39,13 @@ export async function ensureMigrated(db: D1Database): Promise<void> {
     if (applied.has(m.name)) continue;
     const stmts = splitSql(m.sql).map((s) => db.prepare(s));
     stmts.push(db.prepare("INSERT OR IGNORE INTO _app_migrations (name) VALUES (?)").bind(m.name));
-    await db.batch(stmts);
+    try {
+      await db.batch(stmts);
+    } catch (err) {
+      // 同時に来た別のリクエストが先に適用していれば成功とみなす (DROP COLUMN などは2回目に失敗する)
+      const done = await db.prepare("SELECT 1 FROM _app_migrations WHERE name = ?").bind(m.name).first();
+      if (!done) throw err;
+    }
   }
   migrated = true;
 }

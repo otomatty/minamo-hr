@@ -1,7 +1,7 @@
 # ミナモ HR
 
 勤怠管理・人事労務 (従業員データベース)・給与計算・経費精算・ワークフローを一つにまとめた、自社用の人事労務 Web アプリです。
-インフラは Cloudflare だけで完結します (Workers / D1 / KV / R2 / Cron Triggers / Static Assets)。
+インフラは Cloudflare だけで完結します (Workers / D1 / R2 / Cron Triggers / Static Assets)。ログインは Google アカウントで行います。
 
 > 市販の人事労務 SaaS と同等の業務フローを目標にした独自実装です。他社の名称・ロゴ・画面デザインは使用していません。アプリ名は「設定 → 会社・締め日」で変更できます。
 
@@ -11,10 +11,11 @@
 | --- | --- |
 | 勤怠管理 | Web 打刻 (出勤・退勤・休憩、日またぎ勤務)、勤務パターン、月次勤怠表 (24時間ルーラー表示)、打刻修正申請、管理者による直接修正、残業申請、法定内/法定外残業・週40時間超・月60時間超・深夜・法定休日の自動集計、遅刻早退・欠勤の判定、36協定アラート、本日の勤務状況、月次の締め、集計/日次 CSV |
 | 休暇 | 休暇申請 (全日・午前休・午後休、期間指定)、年次有給休暇の自動付与 (労基法39条、比例付与、2年で失効、古い付与分から消化)、年5日取得義務の管理、休暇種別の設定、導入時の繰越・手動付与 |
-| 人事・従業員DB | 従業員の登録・編集・検索・CSV 出力、部署 (階層・部門長)・役職、組織図と社員名簿、扶養家族、人事履歴 (入社・異動・昇格・休職・復職・退職を自動記録)、書類保管 (R2)、退職手続き、ログインアカウントの発行と権限 (管理者・マネージャー・一般) |
+| 人事・従業員DB | 従業員の登録・編集・検索・CSV 出力、部署 (階層・部門長)・役職、組織図と社員名簿、扶養家族、人事履歴 (入社・異動・昇格・休職・復職・退職を自動記録)、書類保管 (R2)、退職手続き、ログインに使う Google アカウントの登録と権限 (管理者・マネージャー・一般) |
 | 給与計算 | 月給・日給・時給、手当 (課税/非課税、割増単価への算入可否)、勤怠連動の割増賃金と欠勤・遅刻早退控除、入退社月の日割り、健康保険・介護保険 (40〜64歳を自動判定)・子ども・子育て支援金・厚生年金・雇用保険、源泉所得税 (月額表 甲欄・乙欄の電算機計算の特例、令和8年分/令和9年分)、住民税 (6月と7月以降)、臨時の支給・控除、経費精算の給与合算、確定・公開、Web 給与明細 (印刷・PDF 保存)、給与一覧 CSV・振込 CSV、標準報酬月額の算定補助 |
 | ワークフロー | 多段承認 (上長・部門長・権限・指定者)、承認/却下/差戻し/取下げ/取消、管理者の代理承認、一括承認、コメント、通知、申請フォームのノーコード作成 (稟議・備品購入・出張・住所変更などを同梱) |
 | 経費精算 | 明細ごとの科目・税率・インボイス登録番号・交通費区間、領収書の添付 (R2)、給与合算または個別振込、支払管理、仕訳 CSV |
+| ログイン | Google アカウントでのログイン (Better Auth)。管理者が登録したメールアドレスの Google アカウントだけがログインでき、Google Workspace のドメインに限定することもできます |
 | その他 | ホームダッシュボード、お知らせ、通知、操作ログ、スマートフォン表示対応 |
 
 ## 構成
@@ -23,8 +24,8 @@
 ブラウザ ──▶ Cloudflare Workers (1つの Worker)
               ├─ Static Assets: React SPA (Vite でビルド)
               └─ /api/*: Hono
-                    ├─ D1  … 全データ (従業員・勤怠・申請・給与)
-                    ├─ KV  … ログインセッション、ログイン試行回数の制限
+                    ├─ /api/auth/*: Better Auth … Google ログイン・ログアウト
+                    ├─ D1  … 全データ (従業員・勤怠・申請・給与・ログインセッション)
                     ├─ R2  … 領収書・従業員の書類
                     └─ Cron Trigger (毎日 0:05 JST) … 有休の自動付与、入社・退職ステータスの更新
 ```
@@ -35,33 +36,66 @@
 - `migrations/` … D1 のスキーマ。**Worker の起動時に自動適用される**ので、手動でマイグレーションを流す必要はありません
 - `tests/` … 計算ロジックのテスト (`npm test`)
 
+## Google ログインの設定
+
+ログインには Google の OAuth クライアントが必要です。
+
+1. [Google Cloud コンソール](https://console.cloud.google.com/) でプロジェクトを選び、「API とサービス → OAuth 同意画面」を設定します。社内だけで使う場合 (Google Workspace) はユーザーの種類を「内部」にします。
+2. 「認証情報 → 認証情報を作成 → OAuth クライアント ID」で、種類「ウェブ アプリケーション」のクライアントを作ります。
+3. 「承認済みのリダイレクト URI」に、アプリの URL の後ろに `/api/auth/callback/google` を付けたものを登録します。
+   - ローカル: `http://localhost:5173/api/auth/callback/google`
+   - 本番: `https://<Worker の URL>/api/auth/callback/google` (workers.dev とカスタムドメインの両方で使う場合は両方)
+4. 表示されたクライアント ID とクライアント シークレットを、下記の `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` に設定します。
+
+| 名前 | 種類 | 内容 |
+| --- | --- | --- |
+| `BETTER_AUTH_SECRET` | シークレット | セッションの署名に使う乱数 (32文字以上)。`openssl rand -base64 32` などで作ります |
+| `GOOGLE_CLIENT_ID` | シークレット | OAuth クライアント ID |
+| `GOOGLE_CLIENT_SECRET` | シークレット | OAuth クライアント シークレット |
+| `GOOGLE_HOSTED_DOMAIN` | `wrangler.jsonc` の vars | 任意。Google Workspace のドメイン (例: `example.co.jp`) を書くと、そのドメインのアカウントだけがログインできます |
+
+ログインできるのは、従業員の「アカウント」タブで登録したメールアドレスの Google アカウント (メールアドレスが Google で確認済みのもの) だけです。登録していない Google アカウントでログインしようとすると、Better Auth のユーザーも作らずに断ります。「ログインを許可する」を外したアカウントと退職者もログインできません。
+
 ## ローカルで動かす
 
 Node.js 20 以上が必要です。
 
 ```bash
 npm install
+cp .dev.vars.example .dev.vars   # BETTER_AUTH_SECRET・GOOGLE_CLIENT_ID・GOOGLE_CLIENT_SECRET を入れる
 npm run dev
 ```
 
-http://localhost:5173 を開くと初期セットアップ画面が出ます。会社名と最初の管理者を登録してください。
-「サンプルデータを入れる」にチェックすると、架空の部署・従業員 7名・2か月分の勤怠・申請が入ります。サンプル従業員のパスワードはすべて `demo1234` です (例: `sato@example.com` はマネージャー、`suzuki@example.com` は一般)。
+http://localhost:5173 を開くと初期セットアップ画面が出ます。最初の管理者になる方の Google アカウントでログインし、会社名と氏名を登録してください。
+「サンプルデータを入れる」にチェックすると、架空の部署・従業員 7名・2か月分の勤怠・申請が入ります。サンプル従業員のメールアドレスは `example.com` の架空のものなのでログインはできません。マネージャーや一般従業員の画面を試すときは、サンプル従業員 (例: マネージャーの佐藤、一般の鈴木) の「アカウント」タブで、メールアドレスを自分の別の Google アカウントに変えてください。
 
-D1・KV・R2 はローカルでは `.wrangler/state` に作られます。消せば初期状態に戻ります。
+D1・R2 はローカルでは `.wrangler/state` に作られます。消せば初期状態に戻ります。
 
 ## Cloudflare にデプロイする
 
 ```bash
 npx wrangler login
+npx wrangler secret put BETTER_AUTH_SECRET
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
 npm run deploy
 ```
 
-`wrangler.jsonc` の D1・KV・R2 には ID を書いていないため、初回デプロイ時に自動で作成されます (Wrangler の Automatic resource provisioning)。
-デプロイ後に表示される URL を開き、初期セットアップを行ってください。スキーマは最初のアクセスで自動作成されます。
+`wrangler.jsonc` の D1・R2 には ID を書いていないため、初回デプロイ時に自動で作成されます (Wrangler の Automatic resource provisioning)。
+デプロイ後に表示される URL を Google の OAuth クライアントのリダイレクト URI に登録してから開き、初期セットアップを行ってください。スキーマは最初のアクセスで自動作成されます。
 
-- 既存の D1 / KV / R2 を使う場合は、`wrangler.jsonc` に `database_id` / `id` / `bucket_name` を追記してください。
-- `main` へ push すると、テストとビルドのあと GitHub Actions がデプロイします。リポジトリの Settings → Secrets and variables → Actions に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を登録してください。トークンは [API Tokens](https://dash.cloudflare.com/profile/api-tokens) の「Edit Cloudflare Workers」で作り、対象アカウントだけに絞ります。D1・Workers KV Storage・Workers R2 Storage の Edit が入っていることを確認してください。Account ID はダッシュボードの Workers 概要に出ます。Workers Builds は接続しないでください。同じ push が二重にデプロイされます。
+- 3つのシークレットは `wrangler.jsonc` の `secrets.required` に書いてあり、未設定のままではデプロイが止まります。まだ Worker が無い初回は、`wrangler secret put` の代わりに `npx wrangler deploy --secrets-file <ファイル>` (`.dev.vars` と同じ `名前=値` の形式) で一緒に登録できます。シークレットは一度登録すれば以後のデプロイでも引き継がれます。
+- 既存の D1 / R2 を使う場合は、`wrangler.jsonc` に `database_id` / `bucket_name` を追記してください。
+- `main` へ push すると、テストとビルドのあと GitHub Actions がデプロイします。リポジトリの Settings → Secrets and variables → Actions に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を登録してください。トークンは [API Tokens](https://dash.cloudflare.com/profile/api-tokens) の「Edit Cloudflare Workers」で作り、対象アカウントだけに絞ります。D1・Workers R2 Storage の Edit が入っていることを確認してください。Account ID はダッシュボードの Workers 概要に出ます。Workers Builds は接続しないでください。同じ push が二重にデプロイされます。Google ログインのシークレットは GitHub ではなく、上の `wrangler secret put` で Worker に登録します。
 - 社外からのアクセスを制限したい場合は、Cloudflare Zero Trust の Access でこの Worker のドメインを保護すると、アプリのログインの前に会社の ID で認証できます。
+
+### パスワードログインからの移行
+
+以前のバージョン (メールアドレスとパスワードでのログイン) からの更新では、デプロイ後の最初のアクセスでパスワードの列が削除され、Google ログインに切り替わります。既存のアカウントは、登録されているメールアドレスと同じ Google アカウントでそのままログインできます。
+
+- デプロイ前に、管理者のメールアドレスが Google アカウント (Gmail または Google Workspace) のものか確認してください。そうでない場合は、先に「アカウント」タブで Google アカウントのメールアドレスに変えておきます。
+- 管理者がだれもログインできなくなった場合は、初期セットアップで登録した管理者 (users の id = 1) のメールアドレスを D1 で直接書き換えます: `npx wrangler d1 execute minamo-hr --remote --command "UPDATE users SET email = '<Google アカウントのメールアドレス>' WHERE id = 1"`
+- 使わなくなった KV (以前のログインセッション用) は、Cloudflare ダッシュボードから削除してかまいません。
 
 ## 法定の料率・税額について
 
@@ -84,7 +118,7 @@ npm run deploy
 
 ## 未対応の機能 (今後の拡張候補)
 
-賞与計算、年末調整、有休付与時の出勤率 (8割) の判定、乙欄の従たる給与についての扶養控除、算定基礎届・月額変更届などの帳票と電子申請 (e-Gov)、マイナンバーの管理、電子契約、人事評価、シフト作成、全銀フォーマットの振込データ、メール通知、SSO (SAML/OIDC)、IC カード・位置情報つき打刻、複数企業 (マルチテナント) での利用。
+賞与計算、年末調整、有休付与時の出勤率 (8割) の判定、乙欄の従たる給与についての扶養控除、算定基礎届・月額変更届などの帳票と電子申請 (e-Gov)、マイナンバーの管理、電子契約、人事評価、シフト作成、全銀フォーマットの振込データ、メール通知、Google 以外のログイン (SAML などの SSO)、IC カード・位置情報つき打刻、複数企業 (マルチテナント) での利用。
 
 ## 開発用コマンド
 

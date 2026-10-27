@@ -1,8 +1,24 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createAuthClient } from "better-auth/client";
 import { api, setUnauthorizedHandler } from "./api";
 
+// Better Auth (/api/auth/*) のクライアント。ログイン・ログアウトだけに使う
+const authClient = createAuthClient();
+
+/** Google のログイン画面へ移動する。ログインできなかったときは /?error=... に戻ってくる */
+export async function signInWithGoogle(): Promise<void> {
+  const { error } = await authClient.signIn.social({ provider: "google", callbackURL: "/", errorCallbackURL: "/" });
+  if (error) throw new Error(error.message || "Google ログインを開始できませんでした");
+}
+
+/** 失敗したら例外を投げる (セッションが残ったままログアウトしたように見せない) */
+export async function signOut(): Promise<void> {
+  const res = await authClient.signOut().catch(() => null);
+  if (!res || res.error) throw new Error("ログアウトできませんでした。通信状況を確認して、もう一度お試しください");
+}
+
 export interface Me {
-  user: { userId: number; employeeId: number; role: "admin" | "manager" | "employee"; email: string; name: string; mustChangePassword: boolean };
+  user: { userId: number; employeeId: number; role: "admin" | "manager" | "employee"; email: string; name: string };
   company: { name: string; appName: string; closingDay: number } | null;
   unreadNotifications: number;
 }
@@ -21,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const refresh = useCallback(async () => {
     try {
-      const r = await api.get<Me | { user: null }>("/auth/me");
+      const r = await api.get<Me | { user: null }>("/session");
       setMe(r.user ? (r as Me) : null);
     } catch {
       setMe(null);
@@ -30,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
   const logout = useCallback(async () => {
-    await api.post("/auth/logout").catch(() => undefined);
+    await signOut();
     setMe(null);
   }, []);
   useEffect(() => {

@@ -1,13 +1,10 @@
 // セットアップ時の「サンプルデータを入れる」用のデモデータ (架空の人物・部署)
 import { all, first, insert, run } from "./db";
-import { hashPassword } from "./auth";
 import { addDays, eachDay, weekday } from "../../shared/dates";
 import { standardFromRemuneration } from "../../shared/calc/insurance";
 import type { SessionUser } from "./context";
 import { autoGrantLeave } from "../domain/leave";
 import { decide, saveExpenseItems, submitRequest } from "../domain/workflow";
-
-export const SAMPLE_PASSWORD = "demo1234";
 
 function rng(seed: number) {
   let s = seed % 2147483647;
@@ -49,7 +46,6 @@ const EMPLOYEES: SampleEmp[] = [
 ];
 
 export async function seedSampleData(db: D1Database, adminEmployeeId: number, today: string): Promise<void> {
-  const pw = await hashPassword(SAMPLE_PASSWORD);
   // 部署
   const hr = await first<{ id: number }>(db, "SELECT id FROM departments WHERE name = '人事総務部'");
   const devId = await insert(db, "INSERT INTO departments (name, code, sort_order) VALUES ('開発部', 'DEV', 1)");
@@ -96,7 +92,7 @@ export async function seedSampleData(db: D1Database, adminEmployeeId: number, to
     codeToId[e.code] = id;
     if (e.head) await run(db, "UPDATE departments SET head_employee_id = ? WHERE id = ?", id, deptIds[e.head]);
     await run(db, "INSERT INTO personnel_events (employee_id, event_date, event_type, description) VALUES (?, ?, 'hire', '入社')", id, e.hire);
-    await run(db, "INSERT INTO users (employee_id, email, password_hash, role) VALUES (?, ?, ?, ?)", id, e.email, pw, e.role);
+    await run(db, "INSERT INTO users (employee_id, email, role) VALUES (?, ?, ?)", id, e.email, e.role);
     await insertSalary(db, id, e.pay);
   }
   await run(db, "UPDATE employees SET manager_id = NULL WHERE id = ?", adminEmployeeId);

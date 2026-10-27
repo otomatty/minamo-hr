@@ -20,12 +20,12 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     (init.headers as Record<string, string>)["Content-Type"] = "application/json";
   }
   const res = await fetch(`/api${url}`, init);
-  if (res.status === 401 && !url.startsWith("/auth/login") && !url.startsWith("/auth/me")) onUnauthorized?.();
+  if (res.status === 401 && !url.startsWith("/session")) onUnauthorized?.();
   const text = await res.text();
   const data = text ? safeJson(text) : null;
   if (!res.ok) throw new ApiError(res.status, (data as any)?.error ?? `エラーが発生しました (${res.status})`);
   // 更新系の操作のあとはサイドバーの件数などを取り直す
-  if (method !== "GET" && !url.startsWith("/notifications") && !url.startsWith("/auth")) window.dispatchEvent(new Event("minamo:changed"));
+  if (method !== "GET" && !url.startsWith("/notifications")) window.dispatchEvent(new Event("minamo:changed"));
   return data as T;
 }
 

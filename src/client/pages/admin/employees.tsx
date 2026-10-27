@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router";
-import { Download, FileUp, KeyRound, Plus, Search, Trash2 } from "lucide-react";
+import { Download, FileUp, Plus, Search, Trash2 } from "lucide-react";
 import { api, downloadUrl } from "../../lib/api";
 import { useAuth, useRole } from "../../lib/auth";
 import { useQuery } from "../../lib/hooks";
@@ -545,7 +545,6 @@ function AccountTab({ data, onChange }: { data: any; onChange: () => void }) {
   const [email, setEmail] = useState(acc?.email ?? data.employee.email ?? "");
   const [role, setRole] = useState(acc?.role ?? "employee");
   const [active, setActive] = useState(acc ? !!acc.is_active : true);
-  const [pw, setPw] = useState<string | null>(null);
   const roleHint = useMemo(
     () => ({ admin: "すべての従業員・給与・設定を管理できます", manager: "部下の勤怠を確認し、申請を承認できます", employee: "自分の勤怠・申請・給与明細を扱えます" })[role as "admin"],
     [role],
@@ -553,8 +552,10 @@ function AccountTab({ data, onChange }: { data: any; onChange: () => void }) {
   return (
     <Panel title="ログインアカウント" className="max-w-xl">
       <div className="space-y-4">
-        {acc && <DefList items={[["最終ログイン", acc.last_login_at ? dateTimeJa(acc.last_login_at) : "未ログイン"], ["初期パスワード", acc.must_change_password ? "未変更" : "変更済み"]]} />}
-        <Field label="メールアドレス (ログインID)"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        {acc && <DefList items={[["最終ログイン", acc.last_login_at ? dateTimeJa(acc.last_login_at) : "未ログイン"]]} />}
+        <Field label="Google アカウントのメールアドレス" hint="本人がこの Google アカウントでログインします">
+          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </Field>
         <Field label="権限" hint={roleHint}>
           <Select value={role} onChange={(e) => setRole(e.target.value)} options={Object.entries(ROLE_JA).map(([value, label]) => ({ value, label }))} />
         </Field>
@@ -564,8 +565,7 @@ function AccountTab({ data, onChange }: { data: any; onChange: () => void }) {
             variant="primary"
             onClick={async () => {
               try {
-                const r = await api.post<{ initialPassword?: string }>(`/employees/${data.employee.id}/account`, { email, role, is_active: active });
-                if (r.initialPassword) setPw(r.initialPassword);
+                await api.post(`/employees/${data.employee.id}/account`, { email, role, is_active: active });
                 toast.ok(acc ? "アカウントを更新しました" : "アカウントを発行しました");
                 onChange();
               } catch (e: any) {
@@ -575,24 +575,7 @@ function AccountTab({ data, onChange }: { data: any; onChange: () => void }) {
           >
             {acc ? "保存する" : "アカウントを発行"}
           </Button>
-          {acc && (
-            <Button
-              onClick={async () => {
-                if (!confirm("パスワードをリセットして新しい初期パスワードを発行しますか？")) return;
-                const r = await api.post<{ initialPassword: string }>(`/employees/${data.employee.id}/account/reset-password`);
-                setPw(r.initialPassword);
-              }}
-            >
-              <KeyRound className="size-4" />パスワードをリセット
-            </Button>
-          )}
         </div>
-        {pw && (
-          <div className="rounded-md border border-asagi-600/40 bg-asagi-100/50 p-3 text-[13px]">
-            初期パスワード: <code className="font-semibold text-[15px] select-all">{pw}</code>
-            <p className="text-xs text-ink-2 mt-1">この画面を閉じると再表示できません。本人に安全な方法で伝えてください。初回ログイン後に変更を求めます。</p>
-          </div>
-        )}
       </div>
     </Panel>
   );
